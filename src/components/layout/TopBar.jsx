@@ -1,12 +1,14 @@
-import { ArrowLeft, Wifi, WifiOff } from 'lucide-react'
+import { ArrowLeft, Wifi, WifiOff, LogOut } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import useSyncStore from '../../store/syncStore'
+import useAuthStore from '../../store/authStore'
 import clsx from 'clsx'
 
 const TopBar = ({ title, showBack = false, actions, className }) => {
   const navigate  = useNavigate()
   const isOnline  = useSyncStore(s => s.isOnline)
   const queueCount = useSyncStore(s => s.queue.length)
+  const { logout } = useAuthStore()
 
   return (
     <header
@@ -45,6 +47,16 @@ const TopBar = ({ title, showBack = false, actions, className }) => {
       </div>
 
       {actions && <div className="flex items-center gap-2">{actions}</div>}
+      
+      <button
+        onClick={logout}
+        id="btn-topbar-logout"
+        className="btn-ghost p-2 rounded-xl text-muted hover:text-danger hover:bg-danger/10 transition-colors ml-1"
+        aria-label="Cerrar sesión"
+        title="Cerrar sesión"
+      >
+        <LogOut size={20} />
+      </button>
     </header>
   )
 }
