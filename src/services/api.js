@@ -87,6 +87,15 @@ export const removeAssignment = async (obraId, userId) => {
   if (error) throw error
 }
 
+export const fetchObraAssignments = async (obraId) => {
+  const { data, error } = await supabase
+    .from('obra_assignments')
+    .select('*, profiles(id, full_name, role, avatar_url)')
+    .eq('obra_id', obraId)
+  if (error) throw error
+  return data || []
+}
+
 // ── STAGES ───────────────────────────────────────────────────
 
 export const fetchStage = async (stageId) => {

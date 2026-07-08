@@ -5,11 +5,22 @@ import TopBar from '../../components/layout/TopBar'
 import StageList from '../../components/obras/StageList'
 import Badge from '../../components/ui/Badge'
 import { fetchObraById } from '../../services/api'
+import useAuthStore from '../../store/authStore'
 
 const ObraDetailPage = () => {
   const { obraId }  = useParams()
+  const { profile } = useAuthStore()
   const [obra, setObra] = useState(null)
   const [loading, setLoading] = useState(true)
+
+  // Determine basePath from the user's role
+  const roleBasePaths = {
+    maestro:    '/maestro',
+    supervisor: '/supervisor',
+    gerencia:   '/gerencia',
+  }
+  const basePath = roleBasePaths[profile?.role] || '/maestro'
+  const canEdit  = profile?.role === 'maestro'
 
   useEffect(() => {
     const load = async () => {
@@ -77,6 +88,12 @@ const ObraDetailPage = () => {
                 {new Date(obra.estimated_end_date).toLocaleDateString('es-AR')}
               </span>
             </div>
+            {maestros.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Users size={15} className="text-accent-DEFAULT shrink-0" />
+                <span>Maestro: {maestros[0].profiles?.full_name || 'N/A'}</span>
+              </div>
+            )}
             {supervisors.length > 0 && (
               <div className="flex items-center gap-2">
                 <Users size={15} className="text-accent-DEFAULT shrink-0" />
@@ -106,8 +123,8 @@ const ObraDetailPage = () => {
           <StageList
             stages={obra.stages}
             obraId={obraId}
-            basePath="/maestro"
-            canEdit
+            basePath={basePath}
+            canEdit={canEdit}
           />
         </div>
       </div>
@@ -116,3 +133,4 @@ const ObraDetailPage = () => {
 }
 
 export default ObraDetailPage
+

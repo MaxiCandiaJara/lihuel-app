@@ -22,7 +22,7 @@ const variantMap = {
 
 const labelMap = {
   pending:   'Pendiente',
-  in_review: 'En Revisión',
+  in_review: 'En revisión',
   approved:  'Aprobada',
   rejected:  'Rechazada',
   active:    'Activa',
@@ -36,30 +36,13 @@ const labelMap = {
   high:      'Alta',
 }
 
-const dotMap = {
-  pending:   '⬜',
-  in_review: '🟡',
-  approved:  '✅',
-  rejected:  '❌',
-  active:    '🟢',
-  paused:    '⏸️',
-  completed: '✅',
-  open:      '🔴',
-  assigned:  '🟠',
-  resolved:  '✅',
-  low:       '🟢',
-  medium:    '🟠',
-  high:      '🔴',
-}
-
 export const Badge = ({ status, label, className }) => {
   const cls    = variantMap[status] || 'badge-pending'
   const text   = label || labelMap[status] || status
-  const dot    = dotMap[status] || ''
 
   return (
     <span className={clsx(cls, className)}>
-      {dot} {text}
+      {text}
     </span>
   )
 }

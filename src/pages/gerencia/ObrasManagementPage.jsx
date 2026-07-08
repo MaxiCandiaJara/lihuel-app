@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
-import { Plus, MapPin, Calendar, Users, Edit, X } from 'lucide-react'
+import { Plus, MapPin, Calendar, Users, Edit, X, UserPlus } from 'lucide-react'
 import TopBar from '../../components/layout/TopBar'
 import ObraCard from '../../components/obras/ObraCard'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Badge from '../../components/ui/Badge'
+import Avatar from '../../components/ui/Avatar'
 import { Input, Select } from '../../components/ui/FormElements'
 import { showToast } from '../../components/ui/Toast'
 import {
   fetchObras, createObra, updateObra,
-  fetchUsersByRole, addAssignment, removeAssignment
+  fetchUsersByRole, addAssignment, removeAssignment,
+  fetchObraAssignments
 } from '../../services/api'
 import useAuthStore from '../../store/authStore'
 
@@ -22,6 +24,11 @@ const ObrasManagementPage = () => {
   const [modal, setModal]             = useState(false)
   const [editObra, setEditObra]       = useState(null)
   const [saving, setSaving]           = useState(false)
+
+  // Assignment state
+  const [selectedMaestro, setSelectedMaestro]       = useState('')
+  const [selectedSupervisor, setSelectedSupervisor] = useState('')
+  const [currentAssignments, setCurrentAssignments] = useState([])
 
   const emptyForm = { name: '', location: '', start_date: '', estimated_end_date: '', status: 'active' }
   const [form, setForm] = useState(emptyForm)
@@ -40,14 +47,38 @@ const ObrasManagementPage = () => {
     if (user) load()
   }, [user])
 
-  const openCreate = () => { setForm(emptyForm); setEditObra(null); setModal(true) }
-  const openEdit   = (obra) => {
+  const openCreate = () => {
+    setForm(emptyForm)
+    setEditObra(null)
+    setSelectedMaestro('')
+    setSelectedSupervisor('')
+    setCurrentAssignments([])
+    setModal(true)
+  }
+
+  const openEdit = async (obra) => {
     setForm({
       name: obra.name, location: obra.location,
       start_date: obra.start_date, estimated_end_date: obra.estimated_end_date,
       status: obra.status,
     })
-    setEditObra(obra); setModal(true)
+    setEditObra(obra)
+
+    // Load current assignments for this obra
+    try {
+      const assignments = await fetchObraAssignments(obra.id)
+      setCurrentAssignments(assignments)
+      const maestroAssign = assignments.find(a => a.role === 'maestro')
+      const supervisorAssign = assignments.find(a => a.role === 'supervisor')
+      setSelectedMaestro(maestroAssign?.user_id || '')
+      setSelectedSupervisor(supervisorAssign?.user_id || '')
+    } catch {
+      setCurrentAssignments([])
+      setSelectedMaestro('')
+      setSelectedSupervisor('')
+    }
+
+    setModal(true)
   }
 
   const handleSave = async (e) => {
@@ -57,17 +88,50 @@ const ObrasManagementPage = () => {
     }
     setSaving(true)
     try {
+      let obraId
       if (editObra) {
         await updateObra(editObra.id, form)
-        showToast('Obra actualizada', 'success')
+        obraId = editObra.id
       } else {
-        await createObra({ ...form, created_by: user.id })
-        showToast('Obra creada', 'success')
+        const newObra = await createObra({ ...form, created_by: user.id })
+        obraId = newObra.id
       }
+
+      // Handle assignments
+      if (obraId) {
+        // Process maestro assignment
+        const currentMaestro = currentAssignments.find(a => a.role === 'maestro')
+        if (selectedMaestro !== (currentMaestro?.user_id || '')) {
+          // Remove old maestro if exists
+          if (currentMaestro) {
+            await removeAssignment(obraId, currentMaestro.user_id)
+          }
+          // Add new maestro if selected
+          if (selectedMaestro) {
+            await addAssignment(obraId, selectedMaestro, 'maestro')
+          }
+        }
+
+        // Process supervisor assignment
+        const currentSupervisor = currentAssignments.find(a => a.role === 'supervisor')
+        if (selectedSupervisor !== (currentSupervisor?.user_id || '')) {
+          // Remove old supervisor if exists
+          if (currentSupervisor) {
+            await removeAssignment(obraId, currentSupervisor.user_id)
+          }
+          // Add new supervisor if selected
+          if (selectedSupervisor) {
+            await addAssignment(obraId, selectedSupervisor, 'supervisor')
+          }
+        }
+      }
+
+      showToast(editObra ? 'Obra actualizada' : 'Obra creada', 'success')
       const updated = await fetchObras(user.id, 'gerencia')
       setObras(updated)
       setModal(false)
     } catch (err) {
+      console.error(err)
       showToast('Error al guardar la obra', 'error')
     } finally { setSaving(false) }
   }
@@ -132,6 +196,49 @@ const ObrasManagementPage = () => {
             <option value="paused">Pausada</option>
             <option value="completed">Completada</option>
           </Select>
+
+          {/* ── ASSIGNMENT SECTION ── */}
+          <div className="border-t border-border pt-4 mt-4">
+            <div className="flex items-center gap-2 mb-3">
+              <UserPlus size={16} className="text-accent-DEFAULT" />
+              <h3 className="text-sm font-bold text-textSecondary">Asignar equipo</h3>
+            </div>
+
+            <div className="space-y-3">
+              <Select id="obra-maestro" label="Maestro de obra"
+                value={selectedMaestro}
+                onChange={e => setSelectedMaestro(e.target.value)}>
+                <option value="">Sin asignar</option>
+                {maestros.map(m => (
+                  <option key={m.id} value={m.id}>{m.full_name}</option>
+                ))}
+              </Select>
+
+              <Select id="obra-supervisor" label="Supervisor"
+                value={selectedSupervisor}
+                onChange={e => setSelectedSupervisor(e.target.value)}>
+                <option value="">Sin asignar</option>
+                {supervisors.map(s => (
+                  <option key={s.id} value={s.id}>{s.full_name}</option>
+                ))}
+              </Select>
+            </div>
+
+            {/* Show current assignments */}
+            {currentAssignments.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-muted">Asignaciones actuales:</p>
+                {currentAssignments.map(a => (
+                  <div key={a.id} className="flex items-center gap-2 text-xs text-textSecondary bg-surface rounded-lg px-3 py-2">
+                    <Avatar name={a.profiles?.full_name || ''} size="sm" />
+                    <span className="flex-1">{a.profiles?.full_name || 'Desconocido'}</span>
+                    <span className="text-muted capitalize">{a.role}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="flex gap-3 pt-2">
             <Button type="button" variant="outline" className="flex-1" onClick={() => setModal(false)}>
               Cancelar

@@ -1,25 +1,17 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../services/supabase'
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead } from '../services/api'
 import useAuthStore from '../store/authStore'
 
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY
-
-const urlBase64ToUint8Array = (base64String) => {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4)
-  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const raw     = window.atob(base64)
-  return new Uint8Array([...raw].map(c => c.charCodeAt(0)))
-}
-
 const useNotifications = () => {
-  const { user, profile } = useAuthStore()
+  const { user } = useAuthStore()
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount]     = useState(0)
   const [loading, setLoading]             = useState(false)
+  const loadedRef = useRef(false)
 
   const load = useCallback(async () => {
-    if (!user) return
+    if (!user?.id) return
     setLoading(true)
     try {
       const data = await fetchNotifications(user.id)
@@ -30,78 +22,80 @@ const useNotifications = () => {
     } finally {
       setLoading(false)
     }
-  }, [user])
+  }, [user?.id])
 
-  // Subscribe to realtime notifications
+  // Load notifications once + subscribe to realtime
   useEffect(() => {
-    if (!user) return
-    load()
+    if (!user?.id) return
 
-    const channel = supabase
-      .channel(`notifications:${user.id}`)
-      .on('postgres_changes', {
-        event:  'INSERT',
-        schema: 'public',
-        table:  'notifications',
-        filter: `user_id=eq.${user.id}`,
-      }, (payload) => {
-        setNotifications(prev => [payload.new, ...prev])
-        setUnreadCount(prev => prev + 1)
-        // Show browser notification if supported
-        showBrowserNotification(payload.new)
-      })
-      .subscribe()
+    // Prevent double-load in strict mode
+    if (!loadedRef.current) {
+      loadedRef.current = true
+      load()
+    }
 
-    return () => supabase.removeChannel(channel)
-  }, [user, load])
+    let channel
+    try {
+      channel = supabase
+        .channel(`notifications:${user.id}`)
+        .on('postgres_changes', {
+          event:  'INSERT',
+          schema: 'public',
+          table:  'notifications',
+          filter: `user_id=eq.${user.id}`,
+        }, (payload) => {
+          setNotifications(prev => [payload.new, ...prev])
+          setUnreadCount(prev => prev + 1)
+          showBrowserNotification(payload.new)
+        })
+        .subscribe()
+    } catch (err) {
+      console.error('Realtime subscription failed:', err)
+    }
+
+    return () => {
+      loadedRef.current = false
+      if (channel) {
+        try { supabase.removeChannel(channel) } catch {}
+      }
+    }
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const markRead = async (id) => {
-    await markNotificationRead(id)
-    setNotifications(prev =>
-      prev.map(n => n.id === id ? { ...n, read: true } : n)
-    )
-    setUnreadCount(prev => Math.max(0, prev - 1))
+    try {
+      await markNotificationRead(id)
+      setNotifications(prev =>
+        prev.map(n => n.id === id ? { ...n, read: true } : n)
+      )
+      setUnreadCount(prev => Math.max(0, prev - 1))
+    } catch (err) {
+      console.error('Failed to mark notification read:', err)
+    }
   }
 
   const markAllRead = async () => {
-    if (!user) return
-    await markAllNotificationsRead(user.id)
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
-    setUnreadCount(0)
+    if (!user?.id) return
+    try {
+      await markAllNotificationsRead(user.id)
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+      setUnreadCount(0)
+    } catch (err) {
+      console.error('Failed to mark all read:', err)
+    }
   }
 
   const showBrowserNotification = (notification) => {
     if (!('Notification' in window)) return
     if (Notification.permission === 'granted') {
-      new Notification(notification.title, {
-        body: notification.body,
-        icon: '/icons/icon-192.png',
-        badge: '/icons/icon-192.png',
-        tag: notification.id,
-      })
-    }
-  }
-
-  const requestPermission = async () => {
-    if (!('Notification' in window)) return false
-    const permission = await Notification.requestPermission()
-    if (permission === 'granted' && VAPID_PUBLIC_KEY && 'serviceWorker' in navigator) {
       try {
-        const reg = await navigator.serviceWorker.ready
-        const sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        new Notification(notification.title, {
+          body: notification.body,
+          icon: '/icons/icon-192.png',
+          badge: '/icons/icon-192.png',
+          tag: notification.id,
         })
-        // Save push subscription to profile
-        await supabase
-          .from('profiles')
-          .update({ push_subscription: JSON.stringify(sub) })
-          .eq('id', user.id)
-      } catch (err) {
-        console.warn('Push subscription failed:', err)
-      }
+      } catch {}
     }
-    return permission === 'granted'
   }
 
   return {
@@ -110,7 +104,6 @@ const useNotifications = () => {
     loading,
     markRead,
     markAllRead,
-    requestPermission,
     reload: load,
   }
 }
